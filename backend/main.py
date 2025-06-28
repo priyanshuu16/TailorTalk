@@ -6,7 +6,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -20,7 +20,9 @@ async def chat_endpoint(request: Request):
             raise HTTPException(status_code=400, detail="Missing 'text' field in request body.")
 
         result: State = agent_app.invoke(data)
-        return result.dict()  # ✅ FIX IS HERE
+
+        # ✅ CRUCIAL FIX: return dict, not State object
+        return result.dict()
 
     except Exception as e:
         return {"error": str(e)}
