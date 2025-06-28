@@ -9,6 +9,17 @@ import google.generativeai as genai
 from datetime import datetime, timedelta, time as dt_time
 from backend.calendar_utils import check_availability, book_slot
 from langgraph.graph import END, StateGraph
+from typing import Optional
+from pydantic import BaseModel
+
+# ✅ Define State schema for LangGraph
+class State(BaseModel):
+    text: Optional[str] = None
+    response: Optional[str] = None
+    last_suggested: Optional[dict] = None
+    suggested_time: Optional[str] = None
+    summary: Optional[str] = None
+    duration: Optional[int] = None
 
 # Configure Gemini
 api_key = os.getenv("GEMINI_API_KEY")
@@ -72,7 +83,6 @@ Respond ONLY with JSON.
         print(f"Raw response: {getattr(response, 'text', '')}")
     return None
 
-# Availability scanning
 def find_next_available_slot(start_after, duration, same_day_only=False, max_days=14):
     search_days = 1 if same_day_only else max_days
     for day_offset in range(search_days):
@@ -89,7 +99,6 @@ def find_next_available_slot(start_after, duration, same_day_only=False, max_day
                     return slot_start
     return None
 
-# Booking
 def handle_schedule_request(details, session_state):
     start_window = dateparser.parse(details.get("start_time")) if details.get("start_time") else None
     end_window = dateparser.parse(details.get("end_time")) if details.get("end_time") else None
@@ -159,7 +168,6 @@ def handle_schedule_request(details, session_state):
         "last_suggested": None
     }
 
-# Availability check
 def handle_availability_check(details, session_state):
     start_time = dateparser.parse(details["start_time"])
     end_time = dateparser.parse(details["end_time"])
@@ -197,16 +205,13 @@ def handle_availability_check(details, session_state):
         "last_suggested": None
     }
 
-# Chat loop
-def chat(state: dict) -> dict:
-    last_suggested = state.get("last_suggested")
-    user_input = state.get("text", "").strip()
+# Chat node
+def chat(state: State) -> State:
+    last_suggested = state.last_suggested
+    user_input = state.text.strip() if state.text else ""
     details = extract_scheduling_details(user_input)
     if not details:
-        return {
-            "response": "❌ Couldn't understand. Try 'Book a meeting tomorrow at 3 PM'.",
-            "last_suggested": None
-        }
+        return State(response="❌ Couldn't understand. Try 'Book a meeting tomorrow at 3 PM'.")
 
     intent = details.get("intent")
     if intent == "confirm":
@@ -217,36 +222,31 @@ def chat(state: dict) -> dict:
             summary = last_suggested["summary"]
             if check_availability(meeting_start, meeting_end):
                 book_slot(summary, meeting_start, meeting_end)
-                return {
-                    "response": f"✅ Confirmed for {meeting_start.strftime('%A, %B %d at %I:%M %p')}",
-                    "last_suggested": None
-                }
+                return State(response=f"✅ Confirmed for {meeting_start.strftime('%A, %B %d at %I:%M %p')}")
             next_slot = find_next_available_slot(meeting_start + timedelta(minutes=15), duration)
             if next_slot:
-                suggestion = {
-                    "suggested_time": next_slot.strftime('%Y-%m-%d %H:%M:%S'),
-                    "summary": summary,
-                    "duration": duration.seconds // 60
-                }
-                return {
-                    "response": f"❌ That time is gone. Next: {next_slot.strftime('%A, %B %d at %I:%M %p')}. Reply 'yes' to confirm.",
-                    "last_suggested": suggestion,
-                    **suggestion
-                }
-            return { "response": "❌ No available slots.", "last_suggested": None }
-        return { "response": "❌ Nothing to confirm. What time would you like to book?", "last_suggested": None }
+                return State(
+                    response=f"❌ That time is gone. Next: {next_slot.strftime('%A, %B %d at %I:%M %p')}. Reply 'yes' to confirm.",
+                    last_suggested={
+                        "suggested_time": next_slot.strftime('%Y-%m-%d %H:%M:%S'),
+                        "summary": summary,
+                        "duration": duration.seconds // 60
+                    }
+                )
+            return State(response="❌ No available slots.")
+        return State(response="❌ Nothing to confirm. What time would you like to book?")
 
     if intent == "clarify":
-        return { "response": details.get("reply", "Could you clarify the date/time?"), "last_suggested": None }
+        return State(response=details.get("reply", "Could you clarify the date/time?"))
     if intent == "book":
-        return handle_schedule_request(details, state)
+        return State(**handle_schedule_request(details, state.dict()))
     if intent == "check_availability":
-        return handle_availability_check(details, state)
+        return State(**handle_availability_check(details, state.dict()))
 
-    return { "response": details.get("reply", "Try rephrasing your request."), "last_suggested": None }
+    return State(response=details.get("reply", "Try rephrasing your request."))
 
-# Create workflow
-workflow = StateGraph(dict)
+# ✅ Corrected workflow with schema
+workflow = StateGraph(State)
 workflow.add_node("chat", chat)
 workflow.set_entry_point("chat")
 workflow.add_edge("chat", END)

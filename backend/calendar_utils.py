@@ -16,20 +16,26 @@ calendar_id = os.getenv("GOOGLE_CALENDAR_ID")
 # Decode base64 credentials
 encoded_credentials = os.getenv("GOOGLE_CREDENTIALS_B64")
 if not encoded_credentials:
-    raise FileNotFoundError("GOOGLE_CREDENTIALS_B64 environment variable is missing.")
+    raise ValueError("Missing GOOGLE_CREDENTIALS_B64 environment variable.")
 
-decoded_bytes = base64.b64decode(encoded_credentials)
-json_credentials = json.loads(decoded_bytes)
+try:
+    decoded_bytes = base64.b64decode(encoded_credentials)
+    json_credentials = json.loads(decoded_bytes)
+except Exception as e:
+    raise ValueError(f"Failed to decode or parse GOOGLE_CREDENTIALS_B64: {e}")
 
-# Write credentials to a temporary file
+# Write credentials to a secure temporary file
 with NamedTemporaryFile("w+", suffix=".json", delete=False) as temp_file:
     json.dump(json_credentials, temp_file)
     temp_file.flush()
-    credentials = service_account.Credentials.from_service_account_file(
-        temp_file.name, scopes=SCOPES
-    )
+    temp_file_name = temp_file.name
 
-# Initialize Google Calendar API service
+# Authenticate
+credentials = service_account.Credentials.from_service_account_file(
+    temp_file_name, scopes=SCOPES
+)
+
+# Initialize Google Calendar API
 service = build('calendar', 'v3', credentials=credentials)
 
 def check_availability(start_dt: datetime, end_dt: datetime) -> bool:
