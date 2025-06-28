@@ -11,3 +11,4 @@ tzlocal==4.2
 pytz==2023.3
 dateparser==1.1.8
 uvicorn[standard]
+google-generativeai==0.4.1
