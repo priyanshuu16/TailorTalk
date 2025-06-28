@@ -12,7 +12,6 @@ from langgraph.graph import END, StateGraph
 from typing import Optional
 from pydantic import BaseModel
 
-# ✅ Define State schema for LangGraph
 class State(BaseModel):
     text: Optional[str] = None
     response: Optional[str] = None
@@ -21,39 +20,15 @@ class State(BaseModel):
     summary: Optional[str] = None
     duration: Optional[int] = None
 
-# Configure Gemini
 api_key = os.getenv("GEMINI_API_KEY")
 if not api_key:
     raise ValueError("GEMINI_API_KEY not found in environment variables.")
 genai.configure(api_key=api_key)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
-# Utils
-def get_weekday_name(weekday):
-    return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][weekday]
-
-def get_month_mondays(year, month):
-    from calendar import monthrange
-    import datetime
-    mondays = []
-    first_day = datetime.date(year, month, 1)
-    last_day = datetime.date(year, month, monthrange(year, month)[1])
-    current = first_day
-    while current <= last_day:
-        if current.weekday() == 0:
-            mondays.append(current)
-        current += timedelta(days=1)
-    return mondays
-
-# Main parsing function
 def extract_scheduling_details(user_message):
     now = datetime.now()
     today = now.date()
-    tomorrow = today + timedelta(days=1)
-    next_monday = today + timedelta(days=(7 - today.weekday()) % 7)
-    if next_monday == today:
-        next_monday += timedelta(days=7)
-
     prompt = f"""
 You are a scheduling assistant. Convert user request into JSON like:
 
@@ -66,10 +41,6 @@ You are a scheduling assistant. Convert user request into JSON like:
   "reply": string | null
 }}
 
-Examples:
-User: "book for 5pm today"
-{{ "intent": "book", "start_time": "{today} 17:00:00", "end_time": "{today} 17:00:00", "duration_minutes": 60, "summary": "Meeting", "reply": "Booking for today at 5pm." }}
-
 User: "{user_message}"
 Respond ONLY with JSON.
 """
@@ -79,21 +50,17 @@ Respond ONLY with JSON.
         if match:
             return json.loads(match.group(0))
     except Exception as e:
-        print(f"Gemini parsing error: {e}")
-        print(f"Raw response: {getattr(response, 'text', '')}")
+        print("Gemini parsing error:", e)
     return None
 
 def find_next_available_slot(start_after, duration, same_day_only=False, max_days=14):
     search_days = 1 if same_day_only else max_days
     for day_offset in range(search_days):
-        candidate_date = (start_after + timedelta(days=day_offset)).date()
+        date = (start_after + timedelta(days=day_offset)).date()
         start_hour = start_after.hour if day_offset == 0 else 9
-        start_minute = start_after.minute if day_offset == 0 else 0
         for hour in range(start_hour, 21):
             for minute in [0, 15, 30, 45]:
-                if hour == start_hour and minute < start_minute:
-                    continue
-                slot_start = datetime.combine(candidate_date, dt_time(hour, minute))
+                slot_start = datetime.combine(date, dt_time(hour, minute))
                 slot_end = slot_start + duration
                 if slot_start >= datetime.now() and check_availability(slot_start, slot_end):
                     return slot_start
@@ -113,11 +80,7 @@ def handle_schedule_request(details, session_state):
                 "response": f"✅ Booked for {start_window.strftime('%A, %B %d at %I:%M %p')}",
                 "last_suggested": None
             }
-        next_slot = find_next_available_slot(
-            start_window + timedelta(minutes=15),
-            duration,
-            same_day_only=start_window.date() == now.date()
-        )
+        next_slot = find_next_available_slot(start_window + timedelta(minutes=15), duration, same_day_only=start_window.date() == now.date())
         if next_slot:
             suggestion = {
                 "suggested_time": next_slot.strftime('%Y-%m-%d %H:%M:%S'),
@@ -129,10 +92,7 @@ def handle_schedule_request(details, session_state):
                 "last_suggested": suggestion,
                 **suggestion
             }
-        return {
-            "response": "❌ No available slots found.",
-            "last_suggested": None
-        }
+        return { "response": "❌ No available slots found.", "last_suggested": None }
 
     if start_window and end_window:
         current_slot = start_window
@@ -149,7 +109,6 @@ def handle_schedule_request(details, session_state):
                     **suggestion
                 }
             current_slot += timedelta(minutes=15)
-
         next_slot = find_next_available_slot(end_window, duration)
         if next_slot:
             suggestion = {
@@ -172,7 +131,6 @@ def handle_availability_check(details, session_state):
     start_time = dateparser.parse(details["start_time"])
     end_time = dateparser.parse(details["end_time"])
     duration = timedelta(minutes=details.get("duration_minutes", 60))
-
     current_slot = start_time
     while current_slot + duration <= end_time:
         if check_availability(current_slot, current_slot + duration):
@@ -187,7 +145,6 @@ def handle_availability_check(details, session_state):
                 **suggestion
             }
         current_slot += timedelta(minutes=15)
-
     next_slot = find_next_available_slot(end_time, duration)
     if next_slot:
         suggestion = {
@@ -200,16 +157,13 @@ def handle_availability_check(details, session_state):
             "last_suggested": suggestion,
             **suggestion
         }
-    return {
-        "response": "❌ No availability found.",
-        "last_suggested": None
-    }
+    return { "response": "❌ No availability found.", "last_suggested": None }
 
-# Chat node
 def chat(state: State) -> State:
     last_suggested = state.last_suggested
     user_input = state.text.strip() if state.text else ""
     details = extract_scheduling_details(user_input)
+
     if not details:
         return State(response="❌ Couldn't understand. Try 'Book a meeting tomorrow at 3 PM'.")
 
@@ -242,10 +196,9 @@ def chat(state: State) -> State:
         return State(**handle_schedule_request(details, state.dict()))
     if intent == "check_availability":
         return State(**handle_availability_check(details, state.dict()))
-
     return State(response=details.get("reply", "Try rephrasing your request."))
 
-# ✅ Corrected workflow with schema
+# 🧠 Define the workflow
 workflow = StateGraph(State)
 workflow.add_node("chat", chat)
 workflow.set_entry_point("chat")
