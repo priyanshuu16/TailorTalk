@@ -4,10 +4,10 @@ from backend.agent import agent_app, State
 
 app = FastAPI()
 
-# Allow all origins for development; restrict in production
+# ✅ CORS setup — allow all origins (change for production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change in production
+    allow_origins=["*"],  # ✅ Replace with frontend URL in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -21,10 +21,10 @@ async def chat_endpoint(request: Request):
         if "text" not in data:
             raise HTTPException(status_code=400, detail="Missing 'text' in request.")
 
-        # ✅ Initialize State object from incoming data
+        # ✅ Validate incoming data using State schema
         state_input = State(**data)
 
-        # ✅ Pass as dictionary to LangGraph (required)
+        # ✅ IMPORTANT: Convert to dict before passing to LangGraph
         result = agent_app.invoke(state_input.dict())
 
         # ✅ Return response as JSON
