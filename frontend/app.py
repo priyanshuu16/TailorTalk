@@ -91,7 +91,6 @@ if prompt:
         st.markdown(prompt)
 
     payload = {"text": prompt}
-    # Always send last_suggested if present
     if st.session_state.pending_suggestion and prompt.lower().strip() in ["yes", "ok", "sure", "confirm", "yep"]:
         payload["last_suggested"] = st.session_state.pending_suggestion
     else:
@@ -99,12 +98,12 @@ if prompt:
 
     with st.spinner("Checking calendar..."):
         try:
-            r = requests.post("http://localhost:8000/chat", json=payload)
+            # ✅ Updated to point to your Render backend
+            r = requests.post("https://tailortalk-backend-t263.onrender.com/chat", json=payload)
             r.raise_for_status()
             response_data = r.json()
             reply = response_data.get("response", "❌ Failed to get a reply.")
 
-            # If the assistant provides a new suggestion, store it
             if "last_suggested" in response_data and response_data["last_suggested"]:
                 st.session_state.pending_suggestion = response_data["last_suggested"]
             else:
